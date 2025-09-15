@@ -1,0 +1,23 @@
+# Python bytecode
+**/__pycache__/
+*.pyc
+*.pyo
+
+# Local & build artifacts
+output/
+backup/
+*.tar.gz
+*.spl
+*.zip
+
+# Virtual env & editor
+.venv/
+.history/
+.vscode/
+.devcontainer/
+.env
+*.env
+
+# UI build outputs (if any)
+ui/node_modules/
+
