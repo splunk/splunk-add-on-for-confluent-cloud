@@ -7,4 +7,3 @@ httpx-ratelimiter==0.0.6
 httpx_auth==0.23.1
 requests>=2.26.0
 urllib3>=1.26.5
-ciso8601

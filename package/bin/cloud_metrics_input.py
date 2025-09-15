@@ -29,7 +29,6 @@ from solnlib.log import Logs
 from solnlib.splunk_rest_client import SplunkRestClient
 from solnlib import conf_manager
 from solnlib import log
-import ciso8601
 
 # local libs
 import confluent_api
@@ -78,6 +77,53 @@ def extract_interval_parts(interval_str):
         return None, None
         
     return parts[0].strip(), parts[1].strip()
+
+def parse_iso8601_datetime(datetime_str):
+    """
+    Parse ISO 8601 datetime string using native Python datetime methods.
+    
+    This replaces ciso8601.parse_datetime() with native Python functionality
+    for Splunk Cloud compatibility.
+    
+    Args:
+        datetime_str: ISO 8601 datetime string (e.g., "2021-02-24T10:00:00Z")
+        
+    Returns:
+        datetime object or None if parsing fails
+    """
+    if not datetime_str:
+        return None
+        
+    try:
+        # Handle common ISO 8601 formats
+        # First try: standard format with 'Z' suffix
+        if datetime_str.endswith('Z'):
+            # Replace 'Z' with '+00:00' for fromisoformat compatibility
+            iso_str = datetime_str[:-1] + '+00:00'
+            return datetime.fromisoformat(iso_str)
+        
+        # Second try: use fromisoformat directly (handles +00:00, +01:00, etc.)
+        return datetime.fromisoformat(datetime_str)
+        
+    except ValueError:
+        # Fallback: try manual parsing for edge cases
+        try:
+            # Handle 'Z' suffix with strptime
+            if datetime_str.endswith('Z'):
+                return datetime.strptime(datetime_str, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+            
+            # Handle microseconds with Z
+            if 'T' in datetime_str and datetime_str.endswith('Z'):
+                return datetime.strptime(datetime_str, '%Y-%m-%dT%H:%M:%S.%fZ').replace(tzinfo=timezone.utc)
+            
+            # Basic ISO format without timezone
+            if 'T' in datetime_str and '+' not in datetime_str and '-' not in datetime_str[-6:]:
+                return datetime.strptime(datetime_str, '%Y-%m-%dT%H:%M:%S')
+                
+        except ValueError as e:
+            LOG.warning("Failed to parse datetime string '%s': %s", datetime_str, e)
+            
+    return None
 
 # ───────────────────────── main class ──────────────────────────────────
 class CLOUD_METRICS_INPUT(smi.Script):
@@ -426,7 +472,7 @@ class CLOUD_METRICS_INPUT(smi.Script):
                     epoch = int(datetime.now(timezone.utc).timestamp())
                 else:
                     try:
-                        dt = ciso8601.parse_datetime(ts)
+                        dt = parse_iso8601_datetime(ts)
                         if dt is None:
                             raise ValueError("Unable to parse timestamp")
                         # Should always be tz-aware for Confluent's "Z" format

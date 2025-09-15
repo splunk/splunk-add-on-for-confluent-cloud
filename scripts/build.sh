@@ -32,7 +32,7 @@
 set -euo pipefail
 
 export PYTHONDONTWRITEBYTECODE=1
-
+export PIP_NO_COMPILE=1
 # ---------- Paths ----------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"      # .../confluent_addon_for_splunk
@@ -158,6 +158,30 @@ prune_compiled_python() {
   local dirs_after
   dirs_after=$(find "${OUT_DIR}" -type d -name '__pycache__' | wc -l | tr -d ' ')
   echo "[INFO]   remaining compiled files: ${cnt_after}, remaining __pycache__ dirs: ${dirs_after}"
+}
+
+# Remove arch-specific native extensions and fail if any remain.
+scrub_native_extensions() {
+  local app_dir="${ADDON_ROOT}/output/confluent_addon_for_splunk"
+  local app_lib="${app_dir}/lib"
+
+  echo "[INFO] Scrubbing native extensions to satisfy aarch64_compatibility…"
+
+  # (A) Remove optional speedups we can safely drop (charset_normalizer speedups)
+  if [ -d "${app_lib}/charset_normalizer" ]; then
+    find "${app_lib}/charset_normalizer" -type f -name '*.so' -print -delete || true
+  fi
+
+  # (B) Detect any native binaries that must NOT ship (e.g., orjson, ciso8601, ujson, etc.)
+  local natives
+  natives="$(find "${app_lib}" -type f \( -name '*.so' -o -name '*.pyd' -o -name '*.dylib' \) 2>/dev/null || true)"
+
+  if [ -n "${natives}" ]; then
+    echo "[ERROR] Native binaries found in packaged lib (not Cloud-safe):"
+    echo "${natives}" | sed 's/^/  - /'
+    echo "[HINT] Remove native deps (e.g., orjson, ciso8601) from package/lib/requirements.txt, or replace with pure-Python alternatives."
+    exit 1
+  fi
 }
 
 verify_no_compiled_in_tarball() {
@@ -302,6 +326,7 @@ run_build() {
   echo "[INFO] Applying required edits…"
   apply_post_build_edits
   prune_compiled_python
+  scrub_native_extensions
 
   echo "[INFO] Packaging: ucc-gen package --path output/${APP_NAME}"
   ( cd "${ROOT_DIR}" && ucc-gen package --path "output/${APP_NAME}" )
