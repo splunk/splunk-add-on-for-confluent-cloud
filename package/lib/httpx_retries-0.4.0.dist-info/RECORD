@@ -1,0 +1,13 @@
+httpx_retries-0.4.0.dist-info/INSTALLER,sha256=zuuue4knoyJ-UwPPXg8fezS7VCrXJQrAP7zeNuwvFQg,4
+httpx_retries-0.4.0.dist-info/METADATA,sha256=pThb9r4gqhqrOsWTCdDu4kQQL-PAO4cmmkOh3Srpgmg,4065
+httpx_retries-0.4.0.dist-info/RECORD,,
+httpx_retries-0.4.0.dist-info/REQUESTED,sha256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU,0
+httpx_retries-0.4.0.dist-info/WHEEL,sha256=qtCwoSJWgHk21S1Kb4ihdzI2rlJ1ZKaIurTj_ngOhyQ,87
+httpx_retries-0.4.0.dist-info/licenses/LICENSE,sha256=jBvPGqYLACqTZE9MiARgKwV1-hXqXuuKFbGBnKxq-6s,1072
+httpx_retries/__init__.py,sha256=9YNVlCTz4wnLBxJPCM681m9IeBJnSstqoNv_OXtQxFg,102
+httpx_retries/__pycache__/__init__.cpython-39.pyc,,
+httpx_retries/__pycache__/retry.cpython-39.pyc,,
+httpx_retries/__pycache__/transport.cpython-39.pyc,,
+httpx_retries/py.typed,sha256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU,0
+httpx_retries/retry.py,sha256=oAyE2AkbFLQ6o6XG1sVBdUXQ76dSpKDZEfHi1Lp498E,10780
+httpx_retries/transport.py,sha256=zHBrSTYPqzUhLdVZm1MjyQEZFnMBpQ5ujg3OxDSFC9c,5635

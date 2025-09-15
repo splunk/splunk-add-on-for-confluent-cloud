@@ -1,0 +1,40 @@
+{
+  "name": "ui",
+  "private": true,
+  "version": "0.0.30",
+  "type": "module",
+  "description": "UI components for Confluent Add-on for Splunk",
+  "scripts": {
+    "ucc-gen": "ucc-gen-ui ta_name=confluent_addon_for_splunk init_file_dir=src/ucc-ui.ts"
+  },
+  "dependencies": {
+    "@splunk/add-on-ucc-framework": "^5.67.0",
+    "@splunk/react-icons": "^5.1.0",
+    "@splunk/react-ui": "^5.1.0",
+    "@splunk/splunk-utils": "^3.2.0",
+    "@splunk/themes": "^1.1.0",
+    "@splunk/ui-utils": "^1.10.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-is": "^18.3.1",
+    "styled-components": "^5.3.10"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.31.0",
+    "@types/node": "24.0.13",
+    "@types/react": "^18.3.14",
+    "@types/react-dom": "^18.3.5",
+    "@types/styled-components": "5.1.34",
+    "typescript": "^5.8.3"
+  },
+  "overrides": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "@types/react": "^18.3.14",
+    "@types/react-dom": "^18.3.5"
+  },
+  "engines": {
+    "node": ">=22",
+    "npm": ">=10"
+  }
+}

@@ -1,0 +1,10 @@
+httpx_ratelimiter-0.0.6.dist-info/INSTALLER,sha256=zuuue4knoyJ-UwPPXg8fezS7VCrXJQrAP7zeNuwvFQg,4
+httpx_ratelimiter-0.0.6.dist-info/LICENSE,sha256=eHEL5ocOvpbcpg7ExRJTWAr3ZrTGXeof-a_RHjnFEKw,1069
+httpx_ratelimiter-0.0.6.dist-info/METADATA,sha256=8DZqkZd6Djdcr4BW6DlDI7EmTE6m1v4z-3beXZnGzAQ,2199
+httpx_ratelimiter-0.0.6.dist-info/RECORD,,
+httpx_ratelimiter-0.0.6.dist-info/REQUESTED,sha256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU,0
+httpx_ratelimiter-0.0.6.dist-info/WHEEL,sha256=EZbGkh7Ie4PoZfRQ8I0ZuP9VklN_TvcZ6DSE5Uar4z4,81
+httpx_ratelimiter/__init__.py,sha256=2gk0xfnmnfQuAL2kL9x-u87b8FLGnL18NbIX63ZNpJI,485
+httpx_ratelimiter/__pycache__/__init__.cpython-39.pyc,,
+httpx_ratelimiter/__pycache__/httpx_ratelimiter.cpython-39.pyc,,
+httpx_ratelimiter/httpx_ratelimiter.py,sha256=8L_zDZ961z2b42M31_eSASE4qYYY8LyDJ7Q8eCg5P5Q,8147
