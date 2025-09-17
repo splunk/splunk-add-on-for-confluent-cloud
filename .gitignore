@@ -21,3 +21,8 @@ backup/
 # UI build outputs (if any)
 ui/node_modules/
 
+# Appinspect artifacts
+/appinspect_*.html
+/appinspect_*.json
+scripts/appinspect_*.html
+scripts/appinspect_*.json
