@@ -1,7 +1,7 @@
 {
   "name": "ui",
   "private": true,
-  "version": "0.0.32",
+  "version": "0.0.2",
   "type": "module",
   "description": "UI components for Confluent Add-on for Splunk",
   "scripts": {

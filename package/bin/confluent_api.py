@@ -657,16 +657,26 @@ class ConfluentTelemetryClient:
         Calculate the duration of an interval in hours with comprehensive format support.
         
         Handles Confluent's supported ISO-8601 interval formats:
-        - "2021-02-24T10:00:00Z/2021-02-24T11:00:00Z" (absolute timestamps)
+        - "2021-02-24T10:00:00Z/2021-02-24T11:00:00Z" (absolute timestamps with Z)
+        - "2019-12-19T11:00:00-05:00/2019-12-19T11:05:00-05:00" (absolute timestamps with timezone offset)
         - "PT6H/now" (duration/relative)
         - "now-6h|h/now|h" (Splunk-style relative with modifiers)
         - "now-2m|m/now" (now with offset and truncation modifiers)
         """
         LOG.debug("Calculating interval hours for: '%s'", interval)
         
-        # Method 1: Handle absolute timestamp intervals (primary Confluent format)
-        # "2021-02-24T10:00:00Z/2021-02-24T11:00:00Z"
-        if "/" in interval and "T" in interval and ("Z" in interval or "+00:00" in interval):
+        # Helper function for enhanced timezone detection
+        def has_timezone_info(timestamp_str):
+            """Check if a timestamp string contains timezone information."""
+            import re
+            return (timestamp_str.endswith('Z') or 
+                    re.search(r'[+-]\d{2}:\d{2}$', timestamp_str) or  # +05:00, -08:00 format
+                    '+00:00' in timestamp_str)
+        
+        # Method 1: Handle absolute timestamp intervals (enhanced detection)
+        # "2021-02-24T10:00:00Z/2021-02-24T11:00:00Z", "2019-12-19T11:00:00-05:00/2019-12-19T11:05:00-05:00"
+        if ("/" in interval and "T" in interval and 
+            any(has_timezone_info(part.strip()) for part in interval.split("/")[:2])):
             try:
                 start_str, end_str = interval.split("/", 1)
                 

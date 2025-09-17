@@ -162,7 +162,7 @@ prune_compiled_python() {
 
 # Remove arch-specific native extensions and fail if any remain.
 scrub_native_extensions() {
-  local app_dir="${ADDON_ROOT}/output/confluent_addon_for_splunk"
+  local app_dir="${ROOT_DIR}/output/${APP_NAME}"
   local app_lib="${app_dir}/lib"
 
   echo "[INFO] Scrubbing native extensions to satisfy aarch64_compatibility…"

@@ -19,7 +19,7 @@ for _p in (BIN_DIR, LIB_DIR):
 
 # stdlib
 import json, logging, traceback
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from urllib.parse import urlsplit
 from typing import List, Dict, Optional, Any
 
@@ -46,6 +46,20 @@ APP_NAME       = "confluent_addon_for_splunk"
 ACCOUNT_CONF   = "confluent_addon_for_splunk_account"
 ACCOUNT_REALM  = f"__REST_CREDENTIAL__#{APP_NAME}#configs/conf-{ACCOUNT_CONF}"
 SETTINGS_CONF = f"{APP_NAME}_settings"
+
+# Granularity to max interval mapping (in hours) - same as in confluent_api.py
+GRANULARITY_LIMITS = {
+    "PT1M": 6,      # 1 minute -> 6 hours max
+    "PT5M": 24,     # 5 minutes -> 1 day max
+    "PT15M": 96,    # 15 minutes -> 4 days max
+    "PT30M": 168,   # 30 minutes -> 7 days max
+    "PT1H": None,   # 1 hour -> Any
+    "PT4H": None,   # 4 hours -> Any
+    "PT6H": None,   # 6 hours -> Any
+    "PT12H": None,  # 12 hours -> Any
+    "P1D": None,    # 1 day -> Any
+    "ALL": None,    # ALL -> Any (special single bucket)
+}
 
 # ───────────────────────────── logging  ────────────────────────────────
 Logs.set_context(
@@ -124,6 +138,178 @@ def parse_iso8601_datetime(datetime_str):
             LOG.warning("Failed to parse datetime string '%s': %s", datetime_str, e)
             
     return None
+
+def calculate_interval_hours(interval_str):
+    """
+    Calculate the duration of an interval in hours.
+    Simplified version of confluent_api._calculate_interval_hours for basic interval validation.
+    
+    Args:
+        interval_str: Interval string (e.g., "now-5m|m/now|m", "2025-09-15T15:53:00Z/now|m", 
+                     "2019-12-19T11:00:00-05:00/2019-12-19T11:05:00-05:00")
+        
+    Returns:
+        float: Duration in hours, or 24.0 as fallback
+    """
+    if not interval_str:
+        return 24.0
+        
+    LOG.debug("Calculating interval hours for: '%s'", interval_str)
+    
+    # Enhanced timezone detection function
+    def has_timezone_info(timestamp_str):
+        """Check if a timestamp string contains timezone information."""
+        import re
+        return (timestamp_str.endswith('Z') or 
+                re.search(r'[+-]\d{2}:\d{2}$', timestamp_str) or  # +05:00, -08:00 format
+                '+00:00' in timestamp_str)
+    
+    # Handle absolute timestamp intervals (enhanced detection)
+    if ("/" in interval_str and "T" in interval_str and 
+        any(has_timezone_info(part.strip()) for part in interval_str.split("/")[:2])):
+        try:
+            start_str, end_str = interval_str.split("/", 1)
+            
+            # Handle end_str which might be "now" or "now" with modifiers
+            if end_str.startswith("now"):
+                end_dt = parse_now_expression(end_str)
+            else:
+                end_dt = parse_iso8601_datetime(end_str)
+            
+            # Handle start_str
+            if start_str.startswith("now"):
+                start_dt = parse_now_expression(start_str)
+            else:
+                start_dt = parse_iso8601_datetime(start_str)
+                
+            if start_dt and end_dt:
+                duration = end_dt - start_dt
+                hours = duration.total_seconds() / 3600
+                LOG.debug("Parsed absolute interval '%s' as %.2f hours", interval_str, hours)
+                return abs(hours)  # Ensure positive duration
+                
+        except Exception as e:
+            LOG.warning("Failed to parse absolute interval '%s': %s", interval_str, e)
+    
+    # Handle relative intervals like "now-5m|m/now|m"
+    if "now" in interval_str and "/" in interval_str:
+        try:
+            start_str, end_str = interval_str.split("/", 1)
+            
+            start_dt = parse_now_expression(start_str) if start_str.startswith("now") else parse_iso8601_datetime(start_str)
+            end_dt = parse_now_expression(end_str) if end_str.startswith("now") else parse_iso8601_datetime(end_str)
+            
+            if start_dt and end_dt:
+                duration = end_dt - start_dt
+                hours = duration.total_seconds() / 3600
+                LOG.debug("Parsed relative interval '%s' as %.2f hours", interval_str, hours)
+                return abs(hours)
+                
+        except Exception as e:
+            LOG.warning("Failed to parse relative interval '%s': %s", interval_str, e)
+    
+    # Conservative fallback
+    LOG.warning("Could not parse interval '%s', assuming 24 hours", interval_str)
+    return 24.0
+
+def parse_now_expression(now_expr):
+    """
+    Parse 'now' expressions with offset and truncation modifiers.
+    Simplified version for basic interval calculation.
+    
+    Examples:
+    - "now" -> current time
+    - "now-5m" -> current time minus 5 minutes
+    - "now|m" -> current time truncated to start of minute
+    - "now-5m|m" -> current time minus 5 minutes, truncated to start of minute
+    """
+    import re
+    
+    # Start with current UTC time
+    current_time = datetime.now(timezone.utc)
+    
+    # Clean the expression
+    expr = now_expr.strip()
+    
+    # Handle simple "now"
+    if expr == "now":
+        return current_time
+    
+    # Split by truncation modifier (|)
+    if "|" in expr:
+        time_part, truncate_part = expr.split("|", 1)
+    else:
+        time_part, truncate_part = expr, None
+    
+    # Parse offset from "now" in time_part
+    offset_match = re.search(r'now([+-])(\d+)([mhd])', time_part)
+    
+    result_time = current_time
+    
+    if offset_match:
+        sign, amount, unit = offset_match.groups()
+        amount = int(amount)
+        
+        if unit == 'm':
+            delta = timedelta(minutes=amount)
+        elif unit == 'h':
+            delta = timedelta(hours=amount)
+        elif unit == 'd':
+            delta = timedelta(days=amount)
+        else:
+            delta = timedelta(0)
+        
+        if sign == '-':
+            result_time = current_time - delta
+        else:
+            result_time = current_time + delta
+    
+    # Apply truncation if specified
+    if truncate_part:
+        if truncate_part == 'm':
+            result_time = result_time.replace(second=0, microsecond=0)
+        elif truncate_part == 'h':
+            result_time = result_time.replace(minute=0, second=0, microsecond=0)
+        elif truncate_part == 'd':
+            result_time = result_time.replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    return result_time
+
+def is_interval_valid_for_granularity(interval_str, granularity):
+    """
+    Check if an interval is valid for the given granularity based on Confluent API limits.
+    
+    Args:
+        interval_str: Interval string to validate
+        granularity: Granularity string (e.g., "PT5M", "PT1H")
+        
+    Returns:
+        bool: True if interval is valid for the granularity, False otherwise
+    """
+    if granularity not in GRANULARITY_LIMITS:
+        LOG.warning("Unknown granularity '%s', assuming valid", granularity)
+        return True
+    
+    max_hours = GRANULARITY_LIMITS[granularity]
+    
+    # Granularities with no limit (PT1H and above, ALL)
+    if max_hours is None:
+        return True
+    
+    # Calculate interval duration
+    interval_hours = calculate_interval_hours(interval_str)
+    
+    # Check if interval exceeds the limit
+    is_valid = interval_hours <= max_hours
+    
+    if not is_valid:
+        LOG.debug("Interval '%s' (%.2fh) exceeds maximum %d hours for granularity '%s'", 
+                 interval_str, interval_hours, max_hours, granularity)
+    else:
+        LOG.debug("Interval '%s' (%.2fh) is valid for granularity '%s' (max: %s hours)", 
+                 interval_str, interval_hours, granularity, max_hours)
+    
+    return is_valid
 
 # ───────────────────────── main class ──────────────────────────────────
 class CLOUD_METRICS_INPUT(smi.Script):
@@ -326,7 +512,9 @@ class CLOUD_METRICS_INPUT(smi.Script):
             
             # Parse original interval to get end boundary
             original_interval = params["common_settings_interval"]
+            granularity = params["common_settings_granularity"]
             _, end_time = extract_interval_parts(original_interval)
+            
             if not end_time:
                 LOG.warning("Invalid interval format: %s, using as-is", original_interval)
                 dynamic_interval = original_interval
@@ -344,11 +532,48 @@ class CLOUD_METRICS_INPUT(smi.Script):
                         except Exception as e:
                             LOG.debug("Could not find metric %s: %s", metric_name, str(e))
 
-                # If we have checkpoints, use earliest one for start time
+                # Determine the best interval to use
                 if last_timestamps:
-                     earliest_ts = min(last_timestamps.values())
-                     dynamic_interval = f"{earliest_ts}/{end_time}"
-                     LOG.debug("Using dynamic interval from checkpoint: %s to %s", earliest_ts, end_time)
+                    earliest_ts = min(last_timestamps.values())
+                    dynamic_interval = f"{earliest_ts}/{end_time}"
+                    
+                    # Calculate durations for both intervals
+                    dynamic_hours = calculate_interval_hours(dynamic_interval)
+                    original_hours = calculate_interval_hours(original_interval)
+                    
+                    # Check if dynamic interval is valid for the granularity
+                    dynamic_valid = is_interval_valid_for_granularity(dynamic_interval, granularity)
+                    original_valid = is_interval_valid_for_granularity(original_interval, granularity)
+                    
+                    # Choose the best interval based on validity and duration
+                    if dynamic_valid and original_valid:
+                        # Both valid: choose the shorter one to avoid unnecessary data fetching
+                        if original_hours <= dynamic_hours:
+                            selected_interval = original_interval
+                            LOG.debug("Both intervals valid, using shorter original interval: %s (%.2fh) vs dynamic: %s (%.2fh)", 
+                                     original_interval, original_hours, dynamic_interval, dynamic_hours)
+                        else:
+                            selected_interval = dynamic_interval
+                            LOG.debug("Both intervals valid, using shorter dynamic interval: %s (%.2fh) vs original: %s (%.2fh)", 
+                                     dynamic_interval, dynamic_hours, original_interval, original_hours)
+                    elif original_valid and not dynamic_valid:
+                        # Only original is valid: use it
+                        selected_interval = original_interval
+                        LOG.debug("Dynamic interval invalid for granularity %s, using original interval: %s", 
+                                 granularity, original_interval)
+                    elif dynamic_valid and not original_valid:
+                        # Only dynamic is valid: use it
+                        selected_interval = dynamic_interval
+                        LOG.debug("Original interval invalid for granularity %s, using dynamic interval: %s", 
+                                 granularity, dynamic_interval)
+                    else:
+                        # Neither is valid: use original and let validation fail with proper error
+                        selected_interval = original_interval
+                        LOG.warning("Both intervals invalid for granularity %s, using original interval: %s (will likely fail validation)", 
+                                   granularity, original_interval)
+                    
+                    dynamic_interval = selected_interval
+                    LOG.debug("Selected interval: %s", dynamic_interval)
                 else:
                     # No checkpoints - use original interval
                     dynamic_interval = original_interval

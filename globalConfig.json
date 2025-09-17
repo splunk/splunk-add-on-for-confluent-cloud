@@ -529,7 +529,7 @@
     "meta": {
         "name": "confluent_addon_for_splunk",
         "restRoot": "confluent_addon_for_splunk",
-        "version": "0.0.32",
+        "version": "0.0.2",
         "displayName": "Confluent Add-on for Splunk",
         "schemaVersion": "0.0.9",
         "supportedThemes": [
