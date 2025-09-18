@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
 # File: scripts/build.sh
 # Purpose:
-#   - Build with UCC (app version from --build ARG) and apply required file edits
-#   - Optionally verify a package with Splunk AppInspect REST API
+#   - Build with UCC and apply required file edits
+#   - Verify a package with Splunk AppInspect REST API
 #
 # Usage:
-#   Build only:          ./scripts/build.sh --build 0.0.29
+#   Build only:          ./scripts/build.sh --build
 #   Verify only:         ./scripts/build.sh --verify ./confluent_addon_for_splunk-0.0.29.tar.gz
-#   Build then verify:   ./scripts/build.sh --build 0.0.29 --verify
+#   Build a given version and then verify:   ./scripts/build.sh --build 0.0.29 --verify
 #
 # Optional:
 #   --xtrace                       # enable bash xtrace (set -x) for extra verbosity
-#   or env: XTRACE=true ./scripts/build.sh ...
 #
 # AppInspect env (for --verify):
 #   export SPLUNK_COM_USERNAME=...
@@ -52,12 +51,13 @@ WANT_XTRACE="${XTRACE:-false}"   # allow env XTRACE=true
 print_help() {
   cat <<EOF
 Usage:
-  Build only:          $0 --build <semver>
+  Build only:          $0 --build [semver]
   Verify only:         $0 --verify <package.tar.gz|.tgz|.spl|.zip>
-  Build then verify:   $0 --build <semver> --verify
+  Build then verify:   $0 --build [semver] --verify
 
 Options:
-  --build <version>     UCC build (-v) with --ta-version, apply file edits, then package.
+  --build [version]     UCC build (-v) with optional --ta-version, apply file edits, then package.
+                        If version is omitted, uses version from globalConfig.json.
   --verify [FILE]       Verify via AppInspect REST API. If used with --build, FILE is ignored.
   --xtrace              Enable bash xtrace (set -x). Password is redacted during login.
   --help                Show this help.
@@ -91,11 +91,11 @@ while (( "$#" )); do
     --xtrace)  : ;;  # already handled above
     --build)
       DO_BUILD=true
-      shift
-      if [ $# -eq 0 ] || [[ "$1" =~ ^-- ]]; then
-        echo "[ERROR] --build requires a version argument (e.g., --build 0.0.29)"; exit 2
+      # Check if next argument exists and is not another flag
+      if [ $# -gt 1 ] && [[ ! "$2" =~ ^-- ]]; then
+        BUILD_VERSION="$2"
+        shift
       fi
-      BUILD_VERSION="$1"
       ;;
     --verify)
       DO_VERIFY=true
@@ -119,6 +119,25 @@ fi
 
 # ---------- Utilities ----------
 need_tool() { command -v "$1" >/dev/null 2>&1 || { echo "[ERROR] '$1' is required"; exit 1; }; }
+
+get_version_from_global_config() {
+  need_tool python3
+  [ -f "${GC_JSON}" ] || { echo "[ERROR] globalConfig.json not found: ${GC_JSON}"; exit 1; }
+  python3 -c "
+import json, sys
+try:
+    with open('${GC_JSON}', 'r') as f:
+        config = json.load(f)
+    version = config.get('meta', {}).get('version')
+    if not version:
+        print('[ERROR] Version not found in globalConfig.json meta.version', file=sys.stderr)
+        sys.exit(1)
+    print(version)
+except Exception as e:
+    print(f'[ERROR] Failed to read version from globalConfig.json: {e}', file=sys.stderr)
+    sys.exit(1)
+"
+}
 
 strip_package_ext() {
   local base="$1"
@@ -320,8 +339,23 @@ run_build() {
   need_tool sed
   assert_layout
 
-  echo "[INFO] Running: ucc-gen build -v --ta-version ${BUILD_VERSION}"
-  ( cd "${ROOT_DIR}" && ucc-gen build -v --ta-version "${BUILD_VERSION}" )
+  # Determine version to use
+  local version_arg=""
+  local actual_version=""
+  
+  if [ -n "${BUILD_VERSION}" ]; then
+    actual_version="${BUILD_VERSION}"
+    echo "[INFO] Using specified version: ${actual_version}"
+  else
+    actual_version="$(get_version_from_global_config)"
+    echo "[INFO] Using version from globalConfig.json: ${actual_version}"
+  fi
+
+  # Always pass --ta-version to prevent UCC from auto-generating versions
+  version_arg="--ta-version ${actual_version}"
+
+  echo "[INFO] Running: ucc-gen build -v ${version_arg}"
+  ( cd "${ROOT_DIR}" && ucc-gen build -v ${version_arg} )
 
   echo "[INFO] Applying required edits…"
   apply_post_build_edits
@@ -331,7 +365,7 @@ run_build() {
   echo "[INFO] Packaging: ucc-gen package --path output/${APP_NAME}"
   ( cd "${ROOT_DIR}" && ucc-gen package --path "output/${APP_NAME}" )
 
-  local expect="${ROOT_DIR}/${APP_NAME}-${BUILD_VERSION}.tar.gz"
+  local expect="${ROOT_DIR}/${APP_NAME}-${actual_version}.tar.gz"
   if [ -f "${expect}" ]; then
     echo "[INFO] Package created: ${expect}"
     verify_no_compiled_in_tarball "${expect}"
