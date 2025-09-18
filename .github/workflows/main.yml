@@ -46,6 +46,32 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4.6.2
         with:
-          name: ${{ steps.build.outputs.built_package }}
+          name: addon-package
           path: ${{ steps.build.outputs.built_package }}
           if-no-files-found: error
+
+  run-appinspect-api:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download built package
+        uses: actions/download-artifact@v5
+        with:
+          name: addon-package
+          path: app-dir
+
+      - name: Run AppInspect API
+        uses: splunk/appinspect-api-action@v3.0.5
+        with:
+          username: ${{ secrets.SPL_COM_USER }}
+          password: ${{ secrets.SPL_COM_PASSWORD }}
+          app_path: app-dir/${{ needs.build.outputs.built_package }}
+
+      - name: Upload AppInspect HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: appinspect-api-html-report
+          path: AppInspect_response.html
