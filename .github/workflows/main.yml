@@ -1,0 +1,53 @@
+name: build
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python 3.9
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install UCC
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install addonfactory-ucc-generator==5.69.1
+
+      - name: Make build script executable
+        run: chmod +x confluent_addon_for_splunk/scripts/build.sh
+
+      - name: Build add-on
+        working-directory: confluent_addon_for_splunk
+        run: |
+          ./scripts/build.sh --build
+          # Extract the actual version from the built package name
+          BUILT_PACKAGE=$(ls confluent_addon_for_splunk-*.tar.gz | head -1)
+          echo "built_package=${BUILT_PACKAGE}" >> $GITHUB_OUTPUT
+          echo "Built package: ${BUILT_PACKAGE}"
+        id: build
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.build.outputs.built_package }}
+          path: confluent_addon_for_splunk/${{ steps.build.outputs.built_package }}
+          if-no-files-found: error
+
