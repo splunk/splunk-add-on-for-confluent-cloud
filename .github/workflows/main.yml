@@ -44,7 +44,7 @@ jobs:
           echo "Built package: ${BUILT_PACKAGE}"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: ${{ steps.build.outputs.built_package }}
           path: ${{ steps.build.outputs.built_package }}
