@@ -33,22 +33,19 @@ jobs:
           python -m pip install splunk-packaging-toolkit
 
       - name: Make build script executable
-        run: chmod +x confluent_addon_for_splunk/scripts/build.sh
+        run: chmod +x scripts/build.sh
 
       - name: Build add-on
-        working-directory: confluent_addon_for_splunk
+        id: build
         run: |
           ./scripts/build.sh --build
-          # Extract the actual version from the built package name
-          BUILT_PACKAGE=$(ls confluent_addon_for_splunk-*.tar.gz | head -1)
-          echo "built_package=${BUILT_PACKAGE}" >> $GITHUB_OUTPUT
+          BUILT_PACKAGE="$(ls -t confluent_addon_for_splunk-*.tar.gz | head -1)"
+          echo "built_package=${BUILT_PACKAGE}" >> "$GITHUB_OUTPUT"
           echo "Built package: ${BUILT_PACKAGE}"
-        id: build
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: ${{ steps.build.outputs.built_package }}
-          path: confluent_addon_for_splunk/${{ steps.build.outputs.built_package }}
+          path: ${{ steps.build.outputs.built_package }}
           if-no-files-found: error
-
