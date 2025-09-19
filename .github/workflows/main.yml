@@ -152,21 +152,23 @@ jobs:
       run: |
         set -euo pipefail
         for i in {1..60}; do
-          if curl -sk https://localhost:8089/services/server/info -o /dev/null; then
-            break
-          fi
-          sleep 5
-        done
-        for i in {1..60}; do
-          STATUS="$(curl -sk https://localhost:8089/services/server/health | grep -Eo 'mode="(green|yellow|red)"' || true)"
-          echo "Health: $STATUS"
-          if echo "$STATUS" | grep -q 'mode="green"'; then
+          STATUS=$(
+            curl -sk "https://localhost:8089/services/server/health?output_mode=json" \
+              -H "Authorization: Splunk $SK" \
+            | jq -r '.entry[] | select(.name=="splunkd") | .content.health // empty' \
+            || true
+          )
+          echo "splunkd: ${STATUS:-<none>}"
+          if [[ "$STATUS" == "green" ]]; then
+            echo "Splunk is ready."
             exit 0
           fi
           sleep 5
         done
-        echo "Splunk did not reach green health in time"; docker logs ${CONTAINER_NAME} | tail -200; exit 1
-
+        echo "splunkd not green in time"
+        docker logs "$CONTAINER_NAME" | tail -200
+        exit 1
+    
     - name: Get session key
       id: session
       run: |
