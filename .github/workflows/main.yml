@@ -227,19 +227,31 @@ jobs:
           echo "CFL_API_KEY / CFL_API_SECRET are not set; fail fast."
           exit 1
         fi
+        
         OUT=/tmp/create_account.json
+        
         HTTP=$(curl -sk -w "%{http_code}" -o "$OUT" \
-          "https://localhost:8089/servicesNS/-/${APP_ROOT}/${APP_ROOT}_account" \
+          "https://localhost:8089/servicesNS/-/${APP_ROOT}/${APP_ROOT}_account?output_mode=json" \
           -H "Authorization: Splunk $SK" \
           --data-urlencode "name=confluent_cloud_test" \
           --data-urlencode "api_key=${CFL_API_KEY}" \
           --data-urlencode "api_secret=${CFL_API_SECRET}")
 
-        echo "HTTP=$HTTP"; cat "$OUT" | jq '.'
-        [[ "$HTTP" =~ ^2..$ ]] || { echo "Account creation failed (HTTP $HTTP)"; exit 1; }
-        jq -e '.messages[]? | select(.type=="ERROR")' "$OUT" >/dev/null && {
-          echo "Account creation returned ERROR message"; exit 1;
-        }
+        if ! [[ "$HTTP" =~ ^2..$ ]]; then
+          echo "Account creation failed (HTTP $HTTP). Response follows:"
+          cat "$OUT" || true
+          echo "Listing app endpoints for debugging:"
+          curl -sk "https://localhost:8089/servicesNS/-/${APP_ROOT}?count=0" -H "Authorization: Splunk $SK" || true
+          exit 1
+        fi
+
+        cat "$OUT" | jq '.'
+        if jq -e '.messages[]? | select(.type=="ERROR")' "$OUT" >/dev/null; then
+          echo "Account creation returned ERROR message"
+          exit 1
+        fi
+
+        echo "Account created OK."
 
     - name: Refresh metric descriptors into KV store
       run: |
