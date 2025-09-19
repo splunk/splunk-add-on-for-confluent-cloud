@@ -33,22 +33,45 @@ jobs:
           python -m pip install splunk-packaging-toolkit
 
       - name: Make build script executable
-        run: chmod +x confluent_addon_for_splunk/scripts/build.sh
+        run: chmod +x scripts/build.sh
 
       - name: Build add-on
-        working-directory: confluent_addon_for_splunk
+        id: build
         run: |
           ./scripts/build.sh --build
-          # Extract the actual version from the built package name
-          BUILT_PACKAGE=$(ls confluent_addon_for_splunk-*.tar.gz | head -1)
-          echo "built_package=${BUILT_PACKAGE}" >> $GITHUB_OUTPUT
+          BUILT_PACKAGE="$(ls -t confluent_addon_for_splunk-*.tar.gz | head -1)"
+          echo "built_package=${BUILT_PACKAGE}" >> "$GITHUB_OUTPUT"
           echo "Built package: ${BUILT_PACKAGE}"
-        id: build
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
-          name: ${{ steps.build.outputs.built_package }}
-          path: confluent_addon_for_splunk/${{ steps.build.outputs.built_package }}
+          name: addon-package
+          path: ${{ steps.build.outputs.built_package }}
           if-no-files-found: error
 
+  run-appinspect-api:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download built package
+        uses: actions/download-artifact@v5
+        with:
+          name: addon-package
+          path: app-dir
+
+      - name: Run AppInspect API
+        uses: splunk/appinspect-api-action@v3.0.5
+        with:
+          username: ${{ secrets.SPL_COM_USER }}
+          password: ${{ secrets.SPL_COM_PASSWORD }}
+          app_path: app-dir/${{ needs.build.outputs.built_package }}
+
+      - name: Upload AppInspect HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: appinspect-api-html-report
+          path: AppInspect_response.html
