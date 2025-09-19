@@ -103,19 +103,10 @@ jobs:
       run: |
         set -euo pipefail
         mkdir -p app-unpacked
-        TARBALL="$(ls -t app-dir/*.tar.gz app-dir/*.tgz app-dir/*.spl app-dir/*.zip 2>/dev/null | head -1)"
-        echo "Using package: $TARBALL"
-        case "$TARBALL" in
-          *.zip) unzip -q "$TARBALL" -d app-unpacked ;;
-          *)     tar -xzf "$TARBALL" -C app-unpacked ;;
-        esac
-        SRC_DIR="$(find app-unpacked -maxdepth 1 -type d -name 'confluent_addon_for_splunk' -print -quit)"
-        if [ -z "$SRC_DIR" ]; then
-          echo "ERROR: Could not find unpacked app folder" >&2
-          exit 1
-        fi
-        mv "$SRC_DIR" "${{ github.workspace }}/confluent_addon_for_splunk"
-        ls -la "${{ github.workspace }}/confluent_addon_for_splunk"
+        TARBALL="$(ls app-dir/confluent_addon_for_splunk-*.tar.gz | head -1)"
+        echo "Using tarball: $TARBALL"
+        tar -xzf "$TARBALL" -C app-unpacked
+        ls -la app-unpacked
 
     - name: Start Splunk container with bind-mounted app (RW)
       run: |
