@@ -569,6 +569,13 @@ class ConfluentTelemetryClient:
         if not intervals:
             raise ConfluentValidationError(f"Missing intervals for metric {metric_name}")
         
+        # Step 1.5: Normalize intervals to list if it's a string
+        if isinstance(intervals, str):
+            intervals = [intervals]
+            settings["intervals"] = intervals  # Update the settings to ensure consistency
+        elif not isinstance(intervals, list):
+            raise ConfluentValidationError(f"Invalid intervals format for metric {metric_name} - must be a string or list")
+        
         # Step 2: Validate mandatory filter field
         if not filter_obj:
             raise ConfluentValidationError(f"Missing filter for metric {metric_name} - at least a resource filter is required")
