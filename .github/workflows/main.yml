@@ -146,37 +146,50 @@ jobs:
 
         echo -e "\033[92m Obtaining Splunk Host Address...\033[0m"
         CONTAINER_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$CONTAINER_NAME")
+        echo "ip=$CONTAINER_IP" >> "$GITHUB_OUTPUT"
         echo "My Splunk instance host: $CONTAINER_IP:8089"  
 
-    - name: Get session key
+    - name: Wait for Splunk container to be healthy
       id: session
       run: |
         set -euo pipefail
-        SK="$(curl -sk https://localhost:8089/services/auth/login \
-          -d username=admin -d password="${SPLUNK_PASSWORD}" -d output_mode=json | jq -r .sessionKey)"
+
+        for i in {1..36}; do
+          DOCKER_STATUS=$(docker inspect --format='{{.State.Health.Status}}' "$CONTAINER_NAME" 2>/dev/null || echo "unknown")
+          echo "Container health: $DOCKER_STATUS"
+          if [ "$DOCKER_STATUS" = "healthy" ]; then
+            break
+          fi
+          sleep 5
+        done
+
+        if [ "$DOCKER_STATUS" != "healthy" ]; then
+          echo "Splunk container did not become healthy in time"
+          docker ps
+          docker logs "$CONTAINER_NAME" | tail -200
+          exit 1
+        fi
+
+        curl -sk -u "admin:${SPLUNK_PASSWORD}" \
+          "https://localhost:8089/services/server/info?output_mode=json" | jq .
+
+        SK=$(curl -sk https://localhost:8089/services/auth/login \
+          -d username=admin -d password="${SPLUNK_PASSWORD}" -d output_mode=json \
+          | jq -r .sessionKey)
         [ -n "$SK" ] || { echo "Failed to obtain session key"; exit 1; }
-        echo "sk=$SK" >> $GITHUB_OUTPUT
-        
-    - name: Wait for Splunk to be ready
-      run: |
-        set -euo pipefail
-        for i in {1..60}; do
-          STATUS=$(
+        echo "sk=$SK" >> "$GITHUB_OUTPUT"
+
+        STATUS=$(
             curl -sk "https://localhost:8089/services/server/health?output_mode=json" \
               -H "Authorization: Splunk $SK" \
             | jq -r '.entry[] | select(.name=="splunkd") | .content.health // empty' \
             || true
           )
-          echo "splunkd: ${STATUS:-<none>}"
-          if [[ "$STATUS" == "green" ]]; then
-            echo "Splunk is ready."
-            exit 0
-          fi
-          sleep 5
-        done
-        echo "splunkd not green in time"
-        docker logs "$CONTAINER_NAME" | tail -200
-        exit 1
+        echo "splunkd: ${STATUS:-<none>}"
+        if [[ "$STATUS" == "green" ]]; then
+          echo "Splunk is ready."
+          exit 0
+        fi
 
     - name: Verify app is visible & list installed apps
       run: |
