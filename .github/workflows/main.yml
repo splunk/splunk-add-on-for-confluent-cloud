@@ -9,9 +9,24 @@ on:
     paths-ignore:
       - '.github/workflows/**'
   workflow_dispatch:
+    inputs:
+      job:
+        description: "Which job to run?"
+        required: true
+        default: "test"
+        type: choice
+        options:
+          - test
+          - run-appinspect-api
+          - build
 
 jobs:
   build:
+    if: >
+      github.event_name == 'push' ||
+      github.event.inputs.job == 'build' ||
+      github.event.inputs.job == 'test' ||
+      github.event.inputs.job == 'run-appinspect-api'
     runs-on: ubuntu-latest
 
     steps:
@@ -53,6 +68,7 @@ jobs:
           if-no-files-found: error
 
   run-appinspect-api:
+    if: github.event_name == 'push' || github.event.inputs.job == 'run-appinspect-api'
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -80,7 +96,8 @@ jobs:
 
   test-v9:
     name: test (Splunk 9.4.4)
-    needs: run-appinspect-api
+    if: github.event_name == 'push' || github.event.inputs.job == 'test'
+    needs: build
     runs-on: ubuntu-latest
     env:
       SPLUNK_IMAGE: splunk/splunk:9.4.4
