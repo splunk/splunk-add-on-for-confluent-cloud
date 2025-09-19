@@ -206,10 +206,17 @@ jobs:
       run: |
         set -euo pipefail
         SK="${{ steps.session.outputs.sk }}"
-        curl -sk "https://localhost:8089/services/kvstore/status?output_mode=json" \
-          -H "Authorization: Splunk $SK" | jq '.'
+        STATUS=$(curl -sk "https://localhost:8089/services/kvstore/status?output_mode=json" \
+          -H "Authorization: Splunk $SK" \
+          | jq -r '.entry[0].content.current.status // empty')
 
-    - name: Create test account (uses repo secrets)
+        echo "KV store status: ${STATUS:-<none>}"
+        if [[ "$STATUS" != "ready" ]]; then
+          echo "ERROR: KV store not healthy (status=$STATUS)"
+          exit 1
+        fi
+
+    - name: Create test account
       env:
         CFL_API_KEY: ${{ secrets.CFL_API_KEY }}
         CFL_API_SECRET: ${{ secrets.CFL_API_SECRET }}
@@ -220,29 +227,47 @@ jobs:
           echo "CFL_API_KEY / CFL_API_SECRET are not set; fail fast."
           exit 1
         fi
-        curl -sk "https://localhost:8089/servicesNS/nobody/${APP_ROOT}/${APP_ROOT}_account" \
+        OUT=/tmp/create_account.json
+        HTTP=$(curl -sk -w "%{http_code}" -o "$OUT" \
+          "https://localhost:8089/servicesNS/-/${APP_ROOT}/${APP_ROOT}_account" \
           -H "Authorization: Splunk $SK" \
           --data-urlencode "name=confluent_cloud_test" \
           --data-urlencode "api_key=${CFL_API_KEY}" \
-          --data-urlencode "api_secret=${CFL_API_SECRET}" \
-          | tr -d '\n'; echo
+          --data-urlencode "api_secret=${CFL_API_SECRET}")
+
+        echo "HTTP=$HTTP"; cat "$OUT" | jq '.'
+        [[ "$HTTP" =~ ^2..$ ]] || { echo "Account creation failed (HTTP $HTTP)"; exit 1; }
+        jq -e '.messages[]? | select(.type=="ERROR")' "$OUT" >/dev/null && {
+          echo "Account creation returned ERROR message"; exit 1;
+        }
 
     - name: Refresh metric descriptors into KV store
       run: |
         set -euo pipefail
         SK="${{ steps.session.outputs.sk }}"
-        curl -sk "https://localhost:8089/servicesNS/-/${APP_ROOT}/confluent_metrics/refresh?output_mode=json" \
+        
+        OUT=/tmp/refresh.json
+        HTTP=$(curl -sk -w "%{http_code}" -o "$OUT" \
+          "https://localhost:8089/servicesNS/-/${APP_ROOT}/confluent_metrics/refresh?output_mode=json" \
           -H "Authorization: Splunk $SK" \
           -H "Content-Type: application/json" \
-          -d '{}' | jq '.'
+          -d '{}')
+        
+        echo "HTTP=$HTTP"; cat "$OUT" | jq '.'
+        [[ "$HTTP" =~ ^2..$ ]] || { echo "Refresh failed (HTTP $HTTP)"; exit 1; }
+        jq -e '.messages[]? | select(.type=="ERROR")' "$OUT" >/dev/null && {
+          echo "Refresh returned ERROR message"; exit 1;
+        }
 
     - name: Enable two metrics (sent_bytes / received_bytes)
       id: enable-metrics
+      env:
+        CFL_CLUSTER_ID: ${{ vars.CFL_CLUSTER_ID }}
       run: |
         set -euo pipefail
         SK="${{ steps.session.outputs.sk }}"
         SENT_KEY="$(curl -sk -H "Authorization: Splunk $SK" \
-          "https://localhost:8089/servicesNS/nobody/${APP_ROOT}/confluent_metrics/list?output_mode=json&metric=io.confluent.kafka.server/sent_bytes&dataset=cloud" \
+          "https://localhost:8089/servicesNS/-/${APP_ROOT}/confluent_metrics/list?output_mode=json&metric=io.confluent.kafka.server/sent_bytes&dataset=cloud" \
           | jq -r '.metric._key')"
         RECV_KEY="$(curl -sk -H "Authorization: Splunk $SK" \
           "https://localhost:8089/servicesNS/nobody/${APP_ROOT}/confluent_metrics/list?output_mode=json&metric=io.confluent.kafka.server/received_bytes&dataset=cloud" \
@@ -250,8 +275,7 @@ jobs:
         echo "sent_key=$SENT_KEY" >> $GITHUB_OUTPUT
         echo "recv_key=$RECV_KEY" >> $GITHUB_OUTPUT
         
-        CLUSTER_ID="${{ secrets.CFLT_CLUSTER_ID }}"
-        [ -n "$CLUSTER_ID" ] || { echo "CFLT_CLUSTER_ID secret is required"; exit 1; }
+        [ -n "$CFL_CLUSTER_ID" ] || { echo "CFL_CLUSTER_ID is required"; exit 1; }
 
         for M in sent_bytes received_bytes; do
           KEY_VAR="$(echo $M | tr a-z A-Z)_KEY"
@@ -262,7 +286,7 @@ jobs:
             --data-binary "{
               \"_key\": \"${KEY_VAL}\",
               \"metric\": \"io.confluent.kafka.server/${M}\",
-              \"filter\": {\"field\":\"resource.kafka.id\",\"op\":\"EQ\",\"value\":\"${CLUSTER_ID}\"},
+              \"filter\": {\"field\":\"resource.kafka.id\",\"op\":\"EQ\",\"value\":\"${CFL_CLUSTER_ID}\"},
               \"enabled\": true,
               \"limit\": 200
             }" | jq '.'
@@ -288,7 +312,7 @@ jobs:
         set -euo pipefail
         SK="${{ steps.session.outputs.sk }}"
         SEARCH='search index=_internal source="*metrics.log" sourcetype=splunkd earliest=-15m group=per_sourcetype_thruput series="${APP_ROOT}*" | stats sum(ev) as events sum(kb) as kb'
-        OUT=$(curl -skG "https://127.0.0.1:8089/servicesNS/-/search/search/jobs/oneshot" \
+        OUT=$(curl -skG "https://localhost:8089/servicesNS/-/search/search/jobs/oneshot" \
           -H "Authorization: Splunk $SK" \
           --data-urlencode search="$SEARCH" \
           --data-urlencode earliest_time='-15m' \
