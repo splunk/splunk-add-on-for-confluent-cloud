@@ -148,6 +148,15 @@ jobs:
         CONTAINER_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$CONTAINER_NAME")
         echo "My Splunk instance host: $CONTAINER_IP:8089"  
 
+    - name: Get session key
+      id: session
+      run: |
+        set -euo pipefail
+        SK="$(curl -sk https://localhost:8089/services/auth/login \
+          -d username=admin -d password="${SPLUNK_PASSWORD}" -d output_mode=json | jq -r .sessionKey)"
+        [ -n "$SK" ] || { echo "Failed to obtain session key"; exit 1; }
+        echo "sk=$SK" >> $GITHUB_OUTPUT
+        
     - name: Wait for Splunk to be ready
       run: |
         set -euo pipefail
@@ -168,15 +177,6 @@ jobs:
         echo "splunkd not green in time"
         docker logs "$CONTAINER_NAME" | tail -200
         exit 1
-    
-    - name: Get session key
-      id: session
-      run: |
-        set -euo pipefail
-        SK="$(curl -sk https://localhost:8089/services/auth/login \
-          -d username=admin -d password="${SPLUNK_PASSWORD}" -d output_mode=json | jq -r .sessionKey)"
-        [ -n "$SK" ] || { echo "Failed to obtain session key"; exit 1; }
-        echo "sk=$SK" >> $GITHUB_OUTPUT
 
     - name: Verify app is visible & list installed apps
       run: |
