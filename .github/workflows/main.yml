@@ -6,6 +6,8 @@ on:
       - main
     tags:
       - 'v*'
+    paths-ignore:
+      - '.github/workflows/**'
   workflow_dispatch:
 
 jobs:
@@ -111,6 +113,7 @@ jobs:
     - name: Start Splunk container with bind-mounted app (RW)
       run: |
         set -euo pipefail
+        echo -e "\033[92m Starting Splunk container...\033[0m"
         docker pull "$SPLUNK_IMAGE"
         docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
         docker run -d --name "$CONTAINER_NAME" \
@@ -120,6 +123,13 @@ jobs:
           -e "SPLUNK_GENERAL_TERMS=--accept-sgt-current-at-splunk-com" \
           -v "${{ github.workspace }}/confluent_addon_for_splunk:/opt/splunk/etc/apps/${APP_ROOT}:rw" \
           "$SPLUNK_IMAGE"
+
+        echo -e "\033[92m Checking running containers...\033[0m"
+        docker ps
+
+        echo -e "\033[92m Obtaining Splunk Host Address...\033[0m"
+        CONTAINER_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$CONTAINER_NAME")
+        echo "My Splunk instance host: $CONTAINER_IP:8089"  
 
     - name: Wait for Splunk to be ready
       run: |
