@@ -75,3 +75,205 @@ jobs:
         with:
           name: appinspect-api-html-report
           path: AppInspect_response.html
+
+  test-v9:
+    name: test (Splunk 9.4.4)
+    needs: run-appinspect-api
+    runs-on: ubuntu-latest
+    env:
+      SPLUNK_IMAGE: splunk/splunk:9.4.4
+      CONTAINER_NAME: splunk-ci
+      SPLUNK_PASSWORD: changeme
+      APP_ROOT: confluent_addon_for_splunk
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Download built artifact
+      uses: actions/download-artifact@v5
+      with:
+        name: addon-package
+        path: app-dir/
+
+    - name: Install test deps (jq, curl)
+      run: |
+        sudo apt-get update -y
+        sudo apt-get install -y jq curl
+
+    - name: Unpack add-on into workspace
+      run: |
+        set -euo pipefail
+        mkdir -p app-unpacked
+        TARBALL="$(ls -t app-dir/*.tar.gz app-dir/*.tgz app-dir/*.spl app-dir/*.zip 2>/dev/null | head -1)"
+        echo "Using package: $TARBALL"
+        case "$TARBALL" in
+          *.zip) unzip -q "$TARBALL" -d app-unpacked ;;
+          *)     tar -xzf "$TARBALL" -C app-unpacked ;;
+        esac
+        SRC_DIR="$(find app-unpacked -maxdepth 1 -type d -name 'confluent_addon_for_splunk' -print -quit)"
+        if [ -z "$SRC_DIR" ]; then
+          echo "ERROR: Could not find unpacked app folder" >&2
+          exit 1
+        fi
+        mv "$SRC_DIR" "${{ github.workspace }}/confluent_addon_for_splunk"
+        ls -la "${{ github.workspace }}/confluent_addon_for_splunk"
+
+    - name: Start Splunk container with bind-mounted app (RW)
+      run: |
+        set -euo pipefail
+        docker pull "$SPLUNK_IMAGE"
+        docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
+        docker run -d --name "$CONTAINER_NAME" \
+          -p 8000:8000 -p 8089:8089 \
+          -e "SPLUNK_PASSWORD=$SPLUNK_PASSWORD" \
+          -e "SPLUNK_START_ARGS=--accept-license" \
+          -e "SPLUNK_GENERAL_TERMS=--accept-sgt-current-at-splunk-com" \
+          -v "${{ github.workspace }}/confluent_addon_for_splunk:/opt/splunk/etc/apps/${APP_ROOT}:rw" \
+          "$SPLUNK_IMAGE"
+
+    - name: Wait for Splunk to be ready
+      run: |
+        set -euo pipefail
+        for i in {1..60}; do
+          if curl -sk https://localhost:8089/services/server/info -o /dev/null; then
+            break
+          fi
+          sleep 5
+        done
+        for i in {1..60}; do
+          STATUS="$(curl -sk https://localhost:8089/services/server/health | grep -Eo 'mode="(green|yellow|red)"' || true)"
+          echo "Health: $STATUS"
+          if echo "$STATUS" | grep -q 'mode="green"'; then
+            exit 0
+          fi
+          sleep 5
+        done
+        echo "Splunk did not reach green health in time"; docker logs ${CONTAINER_NAME} | tail -200; exit 1
+
+    - name: Get session key
+      id: session
+      run: |
+        set -euo pipefail
+        SK="$(curl -sk https://localhost:8089/services/auth/login \
+          -d username=admin -d password="${SPLUNK_PASSWORD}" -d output_mode=json | jq -r .sessionKey)"
+        [ -n "$SK" ] || { echo "Failed to obtain session key"; exit 1; }
+        echo "sk=$SK" >> $GITHUB_OUTPUT
+
+    - name: Verify app is visible & list installed apps
+      run: |
+        set -euo pipefail
+        SK="${{ steps.session.outputs.sk }}"
+        echo "Installed apps (labels):"
+        curl -sk "https://localhost:8089/services/apps/local?output_mode=json" \
+          -H "Authorization: Splunk $SK" | jq -r '.entry[].content.label'
+        curl -sk "https://localhost:8089/services/apps/local?search=${APP_ROOT}&output_mode=json" \
+          -H "Authorization: Splunk $SK" | jq -e ".entry | any(.name == \"${APP_ROOT}\")" >/dev/null && \
+          echo "App ${APP_ROOT} is installed"
+
+    - name: Check KV store status
+      run: |
+        set -euo pipefail
+        SK="${{ steps.session.outputs.sk }}"
+        curl -sk "https://localhost:8089/services/kvstore/status?output_mode=json" \
+          -H "Authorization: Splunk $SK" | jq '.'
+
+    - name: Create test account (uses repo secrets)
+      env:
+        CFLT_API_KEY: ${{ secrets.CFLT_API_KEY }}
+        CFLT_API_SECRET: ${{ secrets.CFLT_API_SECRET }}
+      run: |
+        set -euo pipefail
+        SK="${{ steps.session.outputs.sk }}"
+        if [ -z "${CFLT_API_KEY:-}" ] || [ -z "${CFLT_API_SECRET:-}" ]; then
+          echo "CFLT_API_KEY / CFLT_API_SECRET are not set; fail fast."
+          exit 1
+        fi
+        curl -sk "https://localhost:8089/servicesNS/nobody/${APP_ROOT}/${APP_ROOT}_account" \
+          -H "Authorization: Splunk $SK" \
+          --data-urlencode "name=confluent_cloud_test" \
+          --data-urlencode "api_key=${CFLT_API_KEY}" \
+          --data-urlencode "api_secret=${CFLT_API_SECRET}" \
+          | tr -d '\n'; echo
+
+    - name: Refresh metric descriptors into KV store
+      run: |
+        set -euo pipefail
+        SK="${{ steps.session.outputs.sk }}"
+        curl -sk "https://localhost:8089/servicesNS/-/${APP_ROOT}/confluent_metrics/refresh?output_mode=json" \
+          -H "Authorization: Splunk $SK" \
+          -H "Content-Type: application/json" \
+          -d '{}' | jq '.'
+
+    - name: Enable two metrics (sent_bytes / received_bytes)
+      id: enable-metrics
+      run: |
+        set -euo pipefail
+        SK="${{ steps.session.outputs.sk }}"
+        SENT_KEY="$(curl -sk -H "Authorization: Splunk $SK" \
+          "https://localhost:8089/servicesNS/nobody/${APP_ROOT}/confluent_metrics/list?output_mode=json&metric=io.confluent.kafka.server/sent_bytes&dataset=cloud" \
+          | jq -r '.metric._key')"
+        RECV_KEY="$(curl -sk -H "Authorization: Splunk $SK" \
+          "https://localhost:8089/servicesNS/nobody/${APP_ROOT}/confluent_metrics/list?output_mode=json&metric=io.confluent.kafka.server/received_bytes&dataset=cloud" \
+          | jq -r '.metric._key')"
+        echo "sent_key=$SENT_KEY" >> $GITHUB_OUTPUT
+        echo "recv_key=$RECV_KEY" >> $GITHUB_OUTPUT
+        
+        CLUSTER_ID="${{ secrets.CFLT_CLUSTER_ID }}"
+        [ -n "$CLUSTER_ID" ] || { echo "CFLT_CLUSTER_ID secret is required"; exit 1; }
+
+        for M in sent_bytes received_bytes; do
+          KEY_VAR="$(echo $M | tr a-z A-Z)_KEY"
+          KEY_VAL="${!KEY_VAR}"
+          curl -sk -X PUT "https://localhost:8089/servicesNS/-/${APP_ROOT}/confluent_metrics/update?output_mode=json" \
+            -H "Authorization: Splunk $SK" \
+            -H "Content-Type: application/json" \
+            --data-binary "{
+              \"_key\": \"${KEY_VAL}\",
+              \"metric\": \"io.confluent.kafka.server/${M}\",
+              \"filter\": {\"field\":\"resource.kafka.id\",\"op\":\"EQ\",\"value\":\"${CLUSTER_ID}\"},
+              \"enabled\": true,
+              \"limit\": 200
+            }" | jq '.'
+        done
+
+    - name: Create modular input
+      run: |
+        set -euo pipefail
+        SK="${{ steps.session.outputs.sk }}"
+        curl -sk \
+          -H "Authorization: Splunk $SK" \
+          "https://localhost:8089/servicesNS/-/${APP_ROOT}/${APP_ROOT}_cloud_metrics_input?output_mode=json" \
+          --data-urlencode "name=test_input" \
+          --data-urlencode "account=confluent_cloud_test" \
+          --data-urlencode "datasets=cloud" \
+          --data-urlencode "index=_metrics" \
+          --data-urlencode "interval=15" \
+          --data-urlencode "use_individual_settings=1" \
+          --data-urlencode "disabled=0" | jq '.'
+
+    - name: Verify indexing activity for last 15m
+      run: |
+        set -euo pipefail
+        SK="${{ steps.session.outputs.sk }}"
+        SEARCH='search index=_internal source="*metrics.log" sourcetype=splunkd earliest=-15m group=per_sourcetype_thruput series="${APP_ROOT}*" | stats sum(ev) as events sum(kb) as kb'
+        OUT=$(curl -skG "https://127.0.0.1:8089/servicesNS/-/search/search/jobs/oneshot" \
+          -H "Authorization: Splunk $SK" \
+          --data-urlencode search="$SEARCH" \
+          --data-urlencode earliest_time='-15m' \
+          --data-urlencode latest_time='now' \
+          --data-urlencode search_mode='normal' \
+          --data-urlencode output_mode='json')
+        echo "$OUT" | jq '.'
+        EV=$(echo "$OUT" | jq -r '.results[0].events // "0"')
+        KB=$(echo "$OUT" | jq -r '.results[0].kb // "0"')
+        echo "events=$EV kb=$KB"
+        test "${EV:-0}" != "0" || { echo "No events indexed yet"; exit 1; }
+
+    - name: Dump last Splunk logs on failure
+      if: failure()
+      run: |
+        docker logs ${CONTAINER_NAME} | tail -400 || true
+
+    - name: Cleanup container
+      if: always()
+      run: |
+        docker rm -f ${CONTAINER_NAME} || true
