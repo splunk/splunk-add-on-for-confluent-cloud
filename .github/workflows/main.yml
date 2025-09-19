@@ -211,20 +211,20 @@ jobs:
 
     - name: Create test account (uses repo secrets)
       env:
-        CFLT_API_KEY: ${{ secrets.CFLT_API_KEY }}
-        CFLT_API_SECRET: ${{ secrets.CFLT_API_SECRET }}
+        CFL_API_KEY: ${{ secrets.CFL_API_KEY }}
+        CFL_API_SECRET: ${{ secrets.CFL_API_SECRET }}
       run: |
         set -euo pipefail
         SK="${{ steps.session.outputs.sk }}"
-        if [ -z "${CFLT_API_KEY:-}" ] || [ -z "${CFLT_API_SECRET:-}" ]; then
-          echo "CFLT_API_KEY / CFLT_API_SECRET are not set; fail fast."
+        if [ -z "${CFL_API_KEY:-}" ] || [ -z "${CFL_API_SECRET:-}" ]; then
+          echo "CFL_API_KEY / CFL_API_SECRET are not set; fail fast."
           exit 1
         fi
         curl -sk "https://localhost:8089/servicesNS/nobody/${APP_ROOT}/${APP_ROOT}_account" \
           -H "Authorization: Splunk $SK" \
           --data-urlencode "name=confluent_cloud_test" \
-          --data-urlencode "api_key=${CFLT_API_KEY}" \
-          --data-urlencode "api_secret=${CFLT_API_SECRET}" \
+          --data-urlencode "api_key=${CFL_API_KEY}" \
+          --data-urlencode "api_secret=${CFL_API_SECRET}" \
           | tr -d '\n'; echo
 
     - name: Refresh metric descriptors into KV store
