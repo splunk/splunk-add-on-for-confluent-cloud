@@ -102,7 +102,7 @@ jobs:
     env:
       SPLUNK_IMAGE: splunk/splunk:9.4.4
       CONTAINER_NAME: splunk-ci
-      SPLUNK_PASSWORD: changeme
+      SPLUNK_PASSWORD: changeme123
       APP_ROOT: confluent_addon_for_splunk
     steps:
     - uses: actions/checkout@v5
